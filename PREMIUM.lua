@@ -1,62 +1,186 @@
--- Grow a Garden GUI Script - No Key - Executor Compatible (KRNL / Fluxus / Delta)
-if game.CoreGui:FindFirstChild("GrowGardenGUI") then
-    game.CoreGui:FindFirstChild("GrowGardenGUI"):Destroy()
+repeat wait() until game:IsLoaded()
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local StarterGui = game:GetService("StarterGui")
+local TeleportService = game:GetService("TeleportService")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+local LocalPlayer = Players.LocalPlayer
+
+-- DANH SÁCH TRÁI ÁC QUỶ 2025
+local Fruits = {
+    Mythical = {"Kitsune", "Dragon", "Leopard", "T-Rex", "Venom", "Dough", "Shadow", "Spirit", "Control", "Gravity"},
+    Legendary = {"Magma", "Light", "Dark", "Ice", "Rumble", "Phoenix", "Buddha", "Quake", "Love", "Spider", "Sound", "Pain", "Blizzard"},
+    Epic = {"Flame", "Sand", "Diamond", "Portal", "Revive", "Barrier", "Mammoth", "Yeti", "Falcon", "Ope", "Gas", "Spin"},
+    Rare = {"Bomb", "Spike", "Chop", "Spring", "Kilo", "Smoke", "Rubber", "Rocket"}
+}
+
+local function getFruitRarity(name)
+    for rarity, list in pairs(Fruits) do
+        if table.find(list, name) then return rarity end
+    end
+    return nil
 end
 
-local player = game.Players.LocalPlayer
+-- ANTIBAN: Delay ngẫu nhiên
+local function randomDelay(min, max)
+    if _G.KaitunFarm.antiBan then
+        wait(math.random(min * 10, max * 10) / 10)
+    else
+        wait((min + max) / 2)
+    end
+end
 
--- Tạo GUI
-local gui = Instance.new("ScreenGui")
-gui.Name = "GrowGardenGUI"
-gui.ResetOnSpawn = false
-gui.Parent = game.CoreGui
+-- BAY MƯỢT + NGẪU NHIÊN
+local function flyToFruit(fruitModel)
+    local character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    local hrp = character:WaitForChild("HumanoidRootPart")
+    local handle = fruitModel:FindFirstChild("Handle")
+    if not handle then return end
 
-local frame = Instance.new("Frame", gui)
-frame.Size = UDim2.new(0, 300, 0, 200)
-frame.Position = UDim2.new(0.5, -150, 0.5, -100)
-frame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+    local target = handle.Position + Vector3.new(0, 5, 0)
+    if _G.KaitunFarm.randomFly and _G.KaitunFarm.antiBan then
+        target = target + Vector3.new(math.random(-4,4), math.random(1,5), math.random(-4,4))
+    end
 
-local corner = Instance.new("UICorner", frame)
-corner.CornerRadius = UDim.new(0, 12)
+    local dist = (hrp.Position - target).Magnitude
+    local time = math.max(0.1, dist / _G.KaitunFarm.flySpeed)
 
-local title = Instance.new("TextLabel", frame)
-title.Size = UDim2.new(1, 0, 0.2, 0)
-title.Text = "SCRIPT GaG by thien"
-title.TextColor3 = Color3.new(1, 1, 1)
-title.BackgroundTransparency = 1
-title.Font = Enum.Font.GothamBold
-title.TextSize = 20
+    local tween = TweenService:Create(hrp, TweenInfo.new(time * math.random(90,110)/100, Enum.EasingStyle.Linear), {CFrame = CFrame.new(target)})
+    tween:Play()
+    tween.Completed:Wait()
+    randomDelay(0.3, 0.6)
+end
 
-local inputBox = Instance.new("TextBox", frame)
-inputBox.Size = UDim2.new(0.8, 0, 0.2, 0)
-inputBox.Position = UDim2.new(0.1, 0, 0.35, 0)
-inputBox.PlaceholderText = "Raccoon,Dragonfly,..."
-inputBox.Font = Enum.Font.Gotham
-inputBox.TextSize = 16
-inputBox.TextColor3 = Color3.new(1, 1, 1)
-inputBox.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-local inputCorner = Instance.new("UICorner", inputBox)
-inputCorner.CornerRadius = UDim.new(0, 8)
+-- NHẶT TRÁI
+local function pickupFruit(fruitModel)
+    local handle = fruitModel:FindFirstChild("Handle")
+    if not handle then return false end
+    local cd = handle:FindFirstChildOfClass("ClickDetector")
+    if cd then
+        fireclickdetector(cd)
+        randomDelay(0.4, 0.8)
+        return true
+    end
+    return false
+end
 
-local spawnBtn = Instance.new("TextButton", frame)
-spawnBtn.Size = UDim2.new(0.6, 0, 0.2, 0)
-spawnBtn.Position = UDim2.new(0.2, 0, 0.65, 0)
-spawnBtn.Text = "Spawn"
-spawnBtn.Font = Enum.Font.GothamBold
-spawnBtn.TextSize = 16
-spawnBtn.TextColor3 = Color3.new(1, 1, 1)
-spawnBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
-local btnCorner = Instance.new("UICorner", spawnBtn)
-btnCorner.CornerRadius = UDim.new(0, 10)
+-- CẤT TRÁI NGAY SAU KHI NHẶT
+local function storeFruit(fruitName)
+    if not _G.KaitunFarm.autoStore then return end
+    pcall(function()
+        ReplicatedStorage.Remotes.CommF_:InvokeServer("StoreFruit", fruitName, "Store")
+    end)
+end
 
--- Xử lý spawn
-spawnBtn.MouseButton1Click:Connect(function()
-	local itemName = inputBox.Text
-	if itemName and itemName ~= "" then
-		local tool = Instance.new("Tool")
-		tool.Name = itemName
-		tool.RequiresHandle = false
-		tool.CanBeDropped = true
-		tool.Parent = player.Backpack
-	end
+-- TÌM TRÁI THEO Fruit.Value (CHÍNH XÁC 100%)
+local function getFruitName(fruitModel)
+    local fruitPart = fruitModel:FindFirstChild("Fruit")
+    if fruitPart and fruitPart:IsA("StringValue") then
+        return fruitPart.Value
+    end
+    return nil
+end
+
+-- AUTO HOP
+local lastFruitTime = tick()
+spawn(function()
+    while wait(15) do
+        if _G.KaitunFarm.hopWhenEmpty and tick() - lastFruitTime > 120 then
+            StarterGui:SetCore("SendNotification", {Title="KaiTun", Text="The server has no fruit, changing to another server", Duration=4})
+            randomDelay(1, 2)
+            TeleportService:Teleport(game.PlaceId)
+        end
+    end
+end)
+
+-- ANTI-AFK + ANTIBAN
+spawn(function()
+    while wait(18) do
+        if _G.KaitunFarm.antiBan then
+            VirtualUser:CaptureController()
+            VirtualUser:ClickButton2(Vector2.new())
+            pcall(function()
+                local char = LocalPlayer.Character
+                if char and char:FindFirstChild("Humanoid") then
+                    char.Humanoid:MoveTo(char.HumanoidRootPart.Position + Vector3.new(math.random(-2,2), 0, math.random(-2,2)))
+                end
+            end)
+        end
+    end
+end)
+
+-- CHẠY CHÍNH: TÌM → BAY → NHẶT → CẤT
+spawn(function()
+    while wait(0.3) do
+        if not (_G.KaitunFarm.mythic or _G.KaitunFarm.legen or _G.KaitunFarm.epic or _G.KaitunFarm.rare) then continue end
+
+        pcall(function()
+            for _, obj in pairs(Workspace:GetChildren()) do
+                if obj:IsA("Model") and obj:FindFirstChild("Handle") and obj:FindFirstChild("Fruit") then
+                    local fruitName = getFruitName(obj)
+                    if not fruitName then continue end
+
+                    local rarity = getFruitRarity(fruitName)
+                    if not rarity then continue end
+
+                    local shouldFarm =
+                        (_G.KaitunFarm.mythic and rarity == "Mythical") or
+                        (_G.KaitunFarm.legen and rarity == "Legendary") or
+                        (_G.KaitunFarm.epic and rarity == "Epic") or
+                        (_G.KaitunFarm.rare and rarity == "Rare")
+
+                    if shouldFarm then
+                        lastFruitTime = tick()
+
+                        -- BAY TỚI
+                        flyToFruit(obj)
+
+                        -- NHẶT
+                        if pickupFruit(obj) then
+                            -- CẤT NGAY
+                            storeFruit(fruitName)
+
+                            -- THÔNG BÁO
+                            if _G.KaitunFarm.notifyRare then
+                                StarterGui:SetCore("SendNotification", {
+                                    Title = rarity:upper() .. "!",
+                                    Text = fruitName .. "has been put in storage",
+                                    Duration = rarity == "Mythical" and 10 or 6
+                                })
+                            end
+                        end
+
+                        randomDelay(0.6, 1.3)
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- GUI ĐƠN GIẢN (TÙY CHỌN)
+spawn(function()
+    local ScreenGui = Instance.new("ScreenGui", LocalPlayer:WaitForChild("PlayerGui"))
+    local Frame = Instance.new("Frame", ScreenGui)
+    Frame.Size = UDim2.new(0, 200, 0, 50)
+    Frame.Position = UDim2.new(0, 10, 0, 10)
+    Frame.BackgroundColor3 = Color3.fromRGB(20, 20, 40)
+    Frame.BorderSizePixel = 0
+    local corner = Instance.new("UICorner", Frame); corner.CornerRadius = UDim.new(0, 8)
+    local TextLabel = Instance.new("TextLabel", Frame)
+    TextLabel.Size = UDim2.new(1,0,1,0)
+    TextLabel.BackgroundTransparency = 1
+    TextLabel.Text = "KaiTun Farm ON"
+    TextLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+    TextLabel.Font = Enum.Font.GothamBold
+    TextLabel.TextSize = 14
+
+    StarterGui:SetCore("SendNotification", {
+        Title = "KaiTun FarmFruits-by Thieen",
+        Text = "Loading...",
+        Duration = 6
+    })
 end)
